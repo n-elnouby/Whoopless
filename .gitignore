@@ -1,0 +1,47 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.pins
+Package.resolved
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# CocoaPods (if ever used)
+Pods/
+
+# macOS cruft
+.DS_Store
+
+# Whoopless-specific
+# Captured raw sensor dumps and analysis plots from development sessions.
+# These are enormous and not useful in the repo.
+*.csv
+/byte_variance.png
+/decoded_phases.png
+/phase_detect.png
+/ppg_candidates.png
+/ppg_demux.png
+/ppg_hunt.png
+/ppg_winner.png
+/raw_sections.png
+/region1_sequential.png
+/region1_split.png
+/single_packet_r1.png
+/three_regions.png
