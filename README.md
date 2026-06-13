@@ -53,7 +53,7 @@ If you're building a different WHOOP client, these are the bits you might want t
 Requirements: Xcode 26+, iOS 17+, paid Apple Developer account (HealthKit needs a team ID).
 
 ```bash
-git clone https://github.com/<you>/Whoopless.git
+git clone https://github.com/n-elnouby/Whoopless.git
 cd Whoopless
 open Whoopless.xcodeproj
 ```
