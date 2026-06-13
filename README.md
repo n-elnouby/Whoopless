@@ -4,7 +4,7 @@ A free, open-source iOS app that bridges WHOOP 4.0 strap data into Apple Health 
 
 Whoopless speaks the WHOOP BLE protocol directly, decodes the strap's `HISTORICAL_DATA` packets, and writes heart rate, heart-rate variability, respiratory rate, SpO2, skin temperature, and sleep samples to HealthKit. If you already have a WHOOP 4.0 strap and you'd rather not pay $250/year for the official app, this exists so you can keep using the hardware.
 
-> **Status:** TestFlight-only. This is an independent community project with no affiliation with WHOOP Inc. Use at your own risk.
+> **Status:** Source-available; sideload via AltStore/Sideloadly or build from source in Xcode. This is an independent community project with no affiliation with WHOOP Inc. Use at your own risk.
 
 ---
 
@@ -15,7 +15,7 @@ Whoopless speaks the WHOOP BLE protocol directly, decodes the strap's `HISTORICA
 | Heart rate (live) | BLE heart-rate service (0x180D) + historical 0x2F packets |
 | Heart-rate variability (SDNN) | Beat-to-beat RR intervals from 0x2F, Malik-filtered, 60s rolling SDNN |
 | Respiratory rate | RSA extraction (zero-crossing on detrended RR) from live RR stream |
-| SpO2 | Red/IR raw samples from 0x2F, ratio-of-ratios (ported from OpenWhoop) |
+| SpO2 *(diagnostic only)* | Red/IR raw samples from 0x2F. **Not written to HealthKit** — per NOOP's protocol schema, raw ADCs are cloud-computed by WHOOP and the on-device ratio-of-ratios approximation reads ~12% low vs Apple Watch. Real SpO2 requires the 0x4B health-snapshot path (in progress). |
 | Skin/body temperature | Thermistor raw from 0x2F, two-point linear calibration |
 | Sleep | HR-based auto-detection (baseline × 0.85 threshold, 10-min debounce) |
 
@@ -30,6 +30,7 @@ Whoopless would not exist without the reverse-engineering work of:
 - **[jogolden/whoomp](https://github.com/jogolden/whoomp)** — initial BLE packet framing, command opcodes, CRC structure. The foundation.
 - **[bWanShiTong/OpenWhoop](https://github.com/bWanShiTong/OpenWhoop)** — HISTORICAL_DATA (0x2F) field layout, SpO2 algorithm, raw-data command structure. The Rust implementation we cross-referenced for byte positions.
 - **[bWanShiTong/reverse-engineering-whoop-post](https://github.com/bWanShiTong/reverse-engineering-whoop-post)** — writeup of the WHOOP proprietary service + command response flow.
+- **[NoopApp/noop](https://github.com/NoopApp/noop)** — `whoop_protocol.json` schema for HISTORICAL_DATA byte positions, the 8-byte `SET_CLOCK` payload discovery, the `SEND_R10_R11_REALTIME` (cmd 63) raw-stream switch, `EXIT_HIGH_FREQ_SYNC` (cmd 97), and confirmation that raw SpO2/temp/respiratory ADCs are cloud-computed (not client-decodable). PolyForm Noncommercial 1.0.0.
 
 Please star those projects. The WHOOP RE community is small and these people did the hard part first. Our contribution is iOS + HealthKit integration and some incremental protocol findings — see [`PROTOCOL_NOTES.md`](./PROTOCOL_NOTES.md) for what we learned that isn't already documented upstream.
 
@@ -40,7 +41,7 @@ Please star those projects. The WHOOP RE community is small and these people did
 If you're building a different WHOOP client, these are the bits you might want to pull:
 
 1. **Confirmed CRC parameters** — CRC-8 poly 0x07 init 0 over length bytes *only*; CRC-32 is plain zlib (not custom XOR as some writeups claim). Verified against captured packets. See `WhoopProtocol.swift`.
-2. **Clock drift handling** — the strap's internal clock drifts hours-to-days without active sync. Whoopless pushes `SET_CLOCK` (opcode 10) with a 4-byte LE Unix timestamp on every connect, and falls back to phone time if a packet's timestamp is >10 minutes off. See `BLEManager.swift`.
+2. **Clock drift handling** — the strap's internal clock drifts hours-to-days without active sync. `SET_CLOCK` (opcode 10) requires an **8-byte payload** (`[secs u32 LE][subsecs u32 LE]`); a 4-byte version is silently ack'd but doesn't latch, leaving the RTC "lost" and causing repeated replays of stale historical buffers. Discovery credit: NoopApp/noop. See `BLEManager.swift`.
 3. **HRV filtering for WHOOP RR values** — WHOOP's 0x2F RR field occasionally contains multi-beat averages or artifacts. A Malik-rule filter (±25% from rolling median) over a 5-minute buffer is needed before SDNN is clinically meaningful. See `ContentView.swift → wireUp()`.
 4. **Two-point skin temperature calibration** — the thermistor raw at bytes 72-73 of 0x2F has no documented scale/offset. Whoopless fits a line between a cool point (off-wrist, room temp) and a warm point (on-wrist, ~32°C). See `SkinTempCalibration.swift`.
 5. **HealthKit integration patterns** — how to throttle writes, use the right HKUnit for SpO2 (fraction, not percent), filter out your own samples when reading back Apple Watch HRV, and bulk-delete when the strap clock misbehaves. See `HealthKitManager.swift`.
@@ -48,12 +49,29 @@ If you're building a different WHOOP client, these are the bits you might want t
 
 ---
 
-## Building
+## Installing — non-developer route (AltStore / Sideloadly)
 
-Requirements: Xcode 26+, iOS 17+, paid Apple Developer account (HealthKit needs a team ID).
+If you don't want to touch Xcode, the easiest path is to sideload a pre-built `.ipa` from this repo's [Releases](https://github.com/n-elnouby/Whoopless/releases) page.
+
+1. **Pick a sideload tool on a Mac or PC:**
+   - [AltStore](https://altstore.io) (recommended — auto-refreshes the 7-day signature in the background)
+   - [Sideloadly](https://sideloadly.io) (simpler, but you re-sign manually every 7 days)
+2. **Install the tool** on your computer, then install its companion app on your iPhone per its instructions. Both ask for your Apple ID — a free one works.
+3. **Download `Whoopless.ipa`** from the latest GitHub Release.
+4. **Drag the `.ipa` into AltStore / Sideloadly.** It re-signs the app with *your* Apple ID and pushes it to your phone.
+5. On the phone: **Settings → General → VPN & Device Management → Trust** your Apple ID for the app.
+6. Launch Whoopless. Grant Bluetooth + HealthKit permissions. Follow the pairing steps below.
+
+> **7-day expiry note:** free Apple IDs only sign for 7 days. AltStore refreshes automatically when your phone and Mac are on the same Wi-Fi. With Sideloadly you re-run the sideload step every week. If you have a paid Apple Developer account ($99/yr), the signature lasts a year.
+
+---
+
+## Building from source
+
+Requirements: Xcode 26+, iOS 17+, an Apple ID (free works for personal builds — paid Apple Developer account only needed for AltStore-free distribution).
 
 ```bash
-git clone https://github.com/<you>/Whoopless.git
+git clone https://github.com/n-elnouby/Whoopless.git
 cd Whoopless
 open Whoopless.xcodeproj
 ```
